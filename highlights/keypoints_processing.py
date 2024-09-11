@@ -1,5 +1,5 @@
 import polars as pl
-
+from pathlib import Path
 DIFF_QUANTILE = 0.85
 FRAME_DIFF = 40
 
@@ -17,8 +17,15 @@ def replace_zeros_with_nans(df: pl.DataFrame) -> pl.DataFrame:
 def filter_by_percentile(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(pl.col("max_diff") > pl.col("max_diff").quantile(DIFF_QUANTILE))
 
+def save_intermediate_csv(df: pl.DataFrame, output_path: Path) -> pl.DataFrame:
+    df.write_csv(output_path/ "processed_keypoints_data.csv")
+    return df
 
-def process_keypoints(df: pl.DataFrame) -> pl.DataFrame:
+def save_chart(df: pl.DataFrame, output_path: Path) -> pl.DataFrame:
+    df.plot.line(x="frame", y="y_Right Knee", color="person").save(output_path/ "chart.png")
+    return df
+
+def process_keypoints(df: pl.DataFrame, output_path: Path) -> pl.DataFrame:
     df = (
         df
         .pivot(on="keypoint", values=["x", "y"], index=["person", "frame"])
@@ -28,8 +35,7 @@ def process_keypoints(df: pl.DataFrame) -> pl.DataFrame:
         .fill_null(strategy="forward")
         .with_columns(pl.col("person").cast(pl.Utf8))
         .pipe(add_diffs)
-
-        # .select(['person', 'frame', 'sum'])
+        .pipe(save_chart, output_path)
     )
     df = (
         df
@@ -39,15 +45,8 @@ def process_keypoints(df: pl.DataFrame) -> pl.DataFrame:
         .unique('frame')
         .sort("frame")
         .with_columns(frame_diff=pl.col("frame").diff())
+        .pipe(save_intermediate_csv, output_path)
         .filter(pl.col("frame_diff")<=FRAME_DIFF)
     )
-    # .plot.line(x="frame", y="y_Right Knee", color="person").save('chart.png')
-
     return df
 
-
-if __name__ == "__main__":
-    df = process_csv("/home/igor/projects/highlights/keypoints_data.csv")
-    print(df)
-
-    # print(df.tail(1000).tail(10))
