@@ -3,6 +3,7 @@ import cv2
 import polars as pl
 from ultralytics import YOLO
 from tqdm import tqdm
+from pathlib import Path
 
 # Define keypoint names
 KEYPOINT_NAMES = [
@@ -14,7 +15,7 @@ KEYPOINT_NAMES = [
 
 USE_N_FRAMES_PER_SECOND = 3
 
-def extract_keypoints(video_path):
+def extract_keypoints(video_path: Path, output_path: Path):
     model = YOLO('yolov8n-pose.pt')
     all_keypoints = []
     cap = cv2.VideoCapture(video_path)
@@ -51,21 +52,6 @@ def extract_keypoints(video_path):
 
     cap.release()
     df = pl.DataFrame(all_keypoints)
+    df.write_csv(output_path/ "raw_keypoints_data.csv")
     return df
 
-if __name__ == "__main__":
-    # if len(sys.argv) != 2:
-    #     print("Usage: python script.py <path_to_movie_file>")
-    #     sys.exit(1)
-
-    # movie_path = sys.argv[1]
-    movie_path = "/home/igor/Downloads/input.mp4"
-    output_csv = "keypoints_data.csv"
-
-    print(f"Processing video: {movie_path}")
-    keypoints_df = extract_keypoints(movie_path)
-
-    print(f"Saving keypoints data to {output_csv}")
-    keypoints_df.write_csv(output_csv)
-
-    print("Done!")
