@@ -18,7 +18,7 @@ def filter_by_percentile(df: pl.DataFrame) -> pl.DataFrame:
     return df.filter(pl.col("max_diff") > pl.col("max_diff").quantile(DIFF_QUANTILE))
 
 def save_intermediate_csv(df: pl.DataFrame, output_path: Path) -> pl.DataFrame:
-    df.write_csv(output_path/ "processed_keypoints_data.csv")
+    df.write_parquet(output_path/ "processed_keypoints_data.parquet")
     return df
 
 def save_chart(df: pl.DataFrame, output_path: Path) -> pl.DataFrame:

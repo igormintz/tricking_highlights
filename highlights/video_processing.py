@@ -52,6 +52,6 @@ def extract_keypoints(video_path: Path, output_path: Path):
 
     cap.release()
     df = pl.DataFrame(all_keypoints)
-    df.write_csv(output_path/ "raw_keypoints_data.csv")
+    df.write_parquet(output_path/ "raw_keypoints_data.parquet")
     return df
 
