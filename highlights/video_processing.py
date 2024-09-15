@@ -26,13 +26,14 @@ def extract_keypoints(video_path: Path, output_path: Path):
     print(f"FPS: {fps}")
     use_nth_frame = int(fps // USE_N_FRAMES_PER_SECOND)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frames = []
 
     for frame_number in tqdm(range(0, total_frames, use_nth_frame), desc="Processing video"):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
         ret, frame = cap.read()
         if not ret:
             break
-
+        frames.append(frame)
         print(f"Processing frame {frame_number}")
         results = model(frame)
         
@@ -57,7 +58,7 @@ def extract_keypoints(video_path: Path, output_path: Path):
     cap.release()
     df = pl.DataFrame(all_keypoints)
     df.write_parquet(output_path/ "raw_keypoints_data.parquet")
-    return df
+    return df, frames
 
 def create_highlight_lists(highlight_frames, threshold=DIFF_BW_FRAMES) -> list[list[int]]:
     """
@@ -86,24 +87,15 @@ def add_intro_and_outro(highlight_frame_list: list[list[int]]) -> list[list[int]
         highlight_frame_list[i] = [group[0] - N_INTRO_FRAMES, group[-1] + N_OUTRO_FRAMES]
     return highlight_frame_list
 
-def create_video_segments(highlight_frame_list: list[list[int]], video_path: Path, output_path: Path):
+def create_video_segments(highlight_frame_list: list[list[int]], frames: list, output_path: Path):
     """
     Create video segments from a list of highlight frames. for every element in the list, the first value is the start of the segment and the second value is the end of the segment.
     save the frames of the video segments to new video files.
     """
-    cap = cv2.VideoCapture(str(video_path))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
-    frames = []
-    for i in tqdm(range(total_frames), desc="Reading frames"):
-        ret, frame = cap.read()
-        if not ret:
-            break
-        frames.append(frame)
-    cap.release()
+
 
     for i, group in enumerate(highlight_frame_list):
-        start_frame, end_frame = max(0, group[0]), min(total_frames - 1, group[1])
+        start_frame, end_frame = max(0, group[0]), min(len(frames) - 1, group[1])
         video_segment = frames[start_frame:end_frame+1]
         
         if video_segment:
@@ -112,6 +104,8 @@ def create_video_segments(highlight_frame_list: list[list[int]], video_path: Pat
             for frame in video_segment:
                 out.write(frame)
             out.release()
+        else:
+            print(f"No frames found for video segment {i}")
         
     print(f"Created {len(highlight_frame_list)} video segments")
 

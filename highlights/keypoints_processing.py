@@ -1,6 +1,6 @@
 import polars as pl
 from pathlib import Path
-DIFF_QUANTILE = 0.85
+DIFF_QUANTILE = 0.75
 FRAME_DIFF = 40
 
 def add_diffs(df: pl.DataFrame) -> pl.DataFrame:
