@@ -39,15 +39,13 @@ def extract_keypoints(video_path: Path, output_path: Path):
         if not ret:
             break
         frames.append(frame)
-        print(f"Processing frame {frame_number}")
-        results = model(frame, device='cpu')
+        results = model(frame, device='cpu', verbose=False)
         
         if results[0].keypoints is None:
             continue
         
         keypoints_xyn = results[0].keypoints.xyn
         keypoints_conf = results[0].keypoints.conf
-        logging.info(f"processing keypoints for frame {frame_number}")
         if keypoints_xyn is not None and keypoints_conf is not None:
             for person_idx, (keypoints_xy, keypoints_c) in enumerate(zip(keypoints_xyn, keypoints_conf)):
                 for kp_idx, ((x, y), conf) in enumerate(zip(keypoints_xy, keypoints_c)):
@@ -109,6 +107,9 @@ def create_video_segments(highlight_frame_list, frames, output_path, input_video
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     for i, segment_frames in enumerate(video_segments):
+        if len(segment_frames) == 0: #TODO: investigate these cases.
+            print(f"Warning: No frames found for highlight {i+1}")
+            continue
         output_file = output_path / f"highlight_{i+1}.mp4"
         
         print(f"Creating video segment {i+1} with {len(segment_frames)} frames")
