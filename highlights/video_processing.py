@@ -4,6 +4,8 @@ import polars as pl
 from ultralytics import YOLO
 from tqdm import tqdm
 from pathlib import Path
+import logging
+import numpy as np
 
 # Define keypoint names
 KEYPOINT_NAMES = [
@@ -19,15 +21,18 @@ N_INTRO_FRAMES = 30
 N_OUTRO_FRAMES = 30
 
 def extract_keypoints(video_path: Path, output_path: Path):
+    logging.info("Extracting keypoints")
+    logging.info("loading model")
     model = YOLO('yolov8n-pose.pt')
     all_keypoints = []
+    logging.info("opening video")
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     print(f"FPS: {fps}")
     use_nth_frame = int(fps // USE_N_FRAMES_PER_SECOND)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frames = []
-
+    logging.info("processing video (iterating over frames)")
     for frame_number in tqdm(range(0, total_frames, use_nth_frame), desc="Processing video"):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
         ret, frame = cap.read()
@@ -35,14 +40,14 @@ def extract_keypoints(video_path: Path, output_path: Path):
             break
         frames.append(frame)
         print(f"Processing frame {frame_number}")
-        results = model(frame)
+        results = model(frame, device='cpu')
         
         if results[0].keypoints is None:
             continue
         
         keypoints_xyn = results[0].keypoints.xyn
         keypoints_conf = results[0].keypoints.conf
-
+        logging.info(f"processing keypoints for frame {frame_number}")
         if keypoints_xyn is not None and keypoints_conf is not None:
             for person_idx, (keypoints_xy, keypoints_c) in enumerate(zip(keypoints_xyn, keypoints_conf)):
                 for kp_idx, ((x, y), conf) in enumerate(zip(keypoints_xy, keypoints_c)):
@@ -57,6 +62,7 @@ def extract_keypoints(video_path: Path, output_path: Path):
 
     cap.release()
     df = pl.DataFrame(all_keypoints)
+    logging.info("writing parquet file")
     df.write_parquet(output_path/ "raw_keypoints_data.parquet")
     return df, frames
 
@@ -87,27 +93,40 @@ def add_intro_and_outro(highlight_frame_list: list[list[int]]) -> list[list[int]
         highlight_frame_list[i] = [group[0] - N_INTRO_FRAMES, group[-1] + N_OUTRO_FRAMES]
     return highlight_frame_list
 
-def create_video_segments(highlight_frame_list: list[list[int]], frames: list, output_path: Path):
-    """
-    Create video segments from a list of highlight frames. for every element in the list, the first value is the start of the segment and the second value is the end of the segment.
-    save the frames of the video segments to new video files.
-    """
+def create_video_segments(highlight_frame_list, frames, output_path, input_video_path):
+    video_segments = [frames[start:end] for start, end in highlight_frame_list]
+    
+    # Open the original video file
+    cap = cv2.VideoCapture(str(input_video_path))
+    
+    if not cap.isOpened():
+        print("Error: Could not open video file")
+        return
+    
+    # Get video properties
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-
-    for i, group in enumerate(highlight_frame_list):
-        start_frame, end_frame = max(0, group[0]), min(len(frames) - 1, group[1])
-        video_segment = frames[start_frame:end_frame+1]
+    for i, segment_frames in enumerate(video_segments):
+        output_file = output_path / f"highlight_{i+1}.mp4"
         
-        if video_segment:
-            output_file = output_path / f"video_segment_{i}.mp4"
-            out = cv2.VideoWriter(str(output_file), cv2.VideoWriter_fourcc(*'mp4v'), 30, (video_segment[0].shape[1], video_segment[0].shape[0]))
-            for frame in video_segment:
+        print(f"Creating video segment {i+1} with {len(segment_frames)} frames")
+        
+        out = cv2.VideoWriter(str(output_file), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+        
+        for frame_number in segment_frames:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = cap.read()
+            if ret:
                 out.write(frame)
-            out.release()
-        else:
-            print(f"No frames found for video segment {i}")
+            else:
+                print(f"Warning: Could not read frame {frame_number}")
         
-    print(f"Created {len(highlight_frame_list)} video segments")
+        out.release()
+        print(f"Created highlight_{i+1}.mp4")
+    
+    cap.release()
+    print(f"Created {len(video_segments)} video segments")
 
 # ... existing code ...
-
