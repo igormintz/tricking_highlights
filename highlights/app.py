@@ -5,6 +5,7 @@ from keypoints_processing import process_keypoints
 from pathlib import Path
 
 def main(input_path, output_path):
+    # TODO: add validations (file exists, extensions)
     logging.info("Starting video processing")
     
     logging.info("Extracting keypoints")
