@@ -28,6 +28,9 @@ def extract_keypoints(video_path: Path, output_path: Path):
     logging.info("opening video")
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0:
+        logging.info("can't determine FPS. defaulting to 60")
+    fps = 60
     print(f"FPS: {fps}")
     use_nth_frame = int(fps // USE_N_FRAMES_PER_SECOND)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
