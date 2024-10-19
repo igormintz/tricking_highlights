@@ -1,8 +1,8 @@
 import polars as pl
 from pathlib import Path
 DIFF_QUANTILE = 0.75 # TODO: optimize
-FRAME_DIFF = 40
 MIN_SECONDS_PER_PERSON = 2
+SHORT_SEGMENTS_SECONDS_THRESH = 0.3
 
 def add_diffs(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(
@@ -25,9 +25,22 @@ def filter_by_datapoints_per_person(df: pl.DataFrame, fps: int) -> pl.DataFrame:
             df['person'].value_counts().filter(pl.col('count')> fps*MIN_SECONDS_PER_PERSON)['person']
         )
     )
+def filter_values(df: pl.DataFrame, fps:int) -> pl.DataFrame:
+    return (
+        df.filter(
+        # no movement
+        (pl.col('max_diff')>0)
+        # extreme movement
+        & (pl.col('max_diff')<(pl.col('max_diff').mean()+2*pl.col('max_diff').std()))
+        ).with_columns(frame_diff=pl.col("frame").diff()).filter(
+        # short segments
+        pl.col('frame_diff')<fps*SHORT_SEGMENTS_SECONDS_THRESH
+        )
+    )
+    
 
-def save_chart(df: pl.DataFrame, output_path: Path) -> pl.DataFrame:
-    df.plot.line(x="frame", y="y_Right Knee", color="person").save(output_path/ "chart.png")
+def save_chart(df: pl.DataFrame, output_path: Path, name: str) -> pl.DataFrame:
+    df.plot.line(x="frame", y="y_Right Knee", color="person").save(output_path/ f"{name}.png")
     return df
 
 def save_df(df, output_path: Path, name: str, save=False,) -> None:
@@ -47,18 +60,20 @@ def process_keypoints(df: pl.DataFrame, output_path: Path, fps:int, save_debug=F
         .with_columns(pl.col("person").cast(pl.Utf8))
         .pipe(add_diffs)
         .pipe(save_df, output_path, "all_keypoints", save_debug)
-        .pipe(filter_by_datapoints_per_person, fps)
-        .pipe(save_chart, output_path)
+        .pipe(save_chart, output_path, "before_filtering")
     )
+    # keep frames that have a lot of movement
     df = (
         df
         .with_columns(max_diff=pl.sum_horizontal([pl.col(x) for x in df.columns if "_diff" in x]))
+        .pipe(filter_by_datapoints_per_person, fps)
+        .pipe(filter_values, fps)
+        .pipe(save_chart, output_path, "after_filtering")
         .select(['person', 'frame', 'max_diff'])
         .pipe(filter_by_percentile)
         .unique('frame')
         .sort("frame")
         .with_columns(frame_diff=pl.col("frame").diff())
-        .filter(pl.col("frame_diff")<=FRAME_DIFF)
         .pipe(save_df, output_path, "processed_keypoints_data", save_debug)
     )
     return df
