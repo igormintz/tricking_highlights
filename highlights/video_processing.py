@@ -16,6 +16,31 @@ KEYPOINT_NAMES = [
     "Left Knee", "Right Knee", "Left Ankle", "Right Ankle"
 ]
 
+    # Define connections for skeleton
+skeleton = [
+    # Body
+    ("Left Shoulder", "Right Shoulder"),
+    ("Left Shoulder", "Left Elbow"),
+    ("Right Shoulder", "Right Elbow"),
+    ("Left Elbow", "Left Wrist"),
+    ("Right Elbow", "Right Wrist"),
+    ("Left Shoulder", "Left Hip"),
+    ("Right Shoulder", "Right Hip"),
+    ("Left Hip", "Right Hip"),
+    ("Left Hip", "Left Knee"),
+    ("Right Hip", "Right Knee"),
+    ("Left Knee", "Left Ankle"),
+    ("Right Knee", "Right Ankle"),
+    # Face
+    ("Left Eye", "Right Eye"),
+    ("Left Eye", "Nose"),
+    ("Right Eye", "Nose"),
+    ("Left Eye", "Left Ear"),
+    ("Right Eye", "Right Ear"),
+    ("Nose", "Left Shoulder"),
+    ("Nose", "Right Shoulder"),
+]
+
 USE_N_FRAMES_PER_SECOND = 3
 SECONDS_BW_HIGHLIGHTS_THRESHOLD = 1
 
@@ -29,7 +54,7 @@ def get_video_properties(video_path: Path) -> tuple:
     if fps == 0:
         logging.info("can't determine FPS. defaulting to 60")
         fps = 60
-    logging.info(f"FPS: {fps}")
+    logging.info(f"Frames per second: {fps}")
     n_total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -86,7 +111,7 @@ def create_highlight_lists(highlight_frames: list, fps: float, threshold_seconds
         if next_frame - end_frame < frame_threshold:
             end_frame = next_frame
         else:
-            if (end_frame - start_frame) / fps > 1
+            if (end_frame - start_frame) / fps > 1:
             # append only >1 second videos
               result.append(list(range(start_frame, end_frame)))
             start_frame = next_frame
@@ -137,52 +162,31 @@ def get_keypoint_coord(kp, width, height):
         return (int(x * width), int(y * height))
     return None
 
-def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, output_path: Path, height, width):
+def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, output_path: Path, height, width, file_name: str, background=None):
     logging.info("Overlaying keypoints on frames")
     
     # Prepare video writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path / "keypoints_overlay.mp4"), fourcc, fps, (width, height))
+    out = cv2.VideoWriter(str(output_path / f"{file_name}.mp4"), fourcc, fps, (width, height))
     
-    # Define colors for each person
-    colors = plt.cm.rainbow(np.linspace(0, 1, 10))  # Up to 10 different colors
-    colors = (colors[:, :3] * 255).astype(int)
+    # Define colors for each person in BGR format
+    colors = plt.cm.rainbow(np.linspace(0, 1, 10))[:, :3] * 255  # Up to 10 different colors
+    colors = colors.astype(int)  # Ensure colors are in integer format
+    colors = [tuple(map(int, color[::-1])) for color in colors]  # Convert from RGB to BGR
     
-    # Define connections for skeleton
-    skeleton = [
-        # Body
-        ("Left Shoulder", "Right Shoulder"),
-        ("Left Shoulder", "Left Elbow"),
-        ("Right Shoulder", "Right Elbow"),
-        ("Left Elbow", "Left Wrist"),
-        ("Right Elbow", "Right Wrist"),
-        ("Left Shoulder", "Left Hip"),
-        ("Right Shoulder", "Right Hip"),
-        ("Left Hip", "Right Hip"),
-        ("Left Hip", "Left Knee"),
-        ("Right Hip", "Right Knee"),
-        ("Left Knee", "Left Ankle"),
-        ("Right Knee", "Right Ankle"),
-        # Face
-        ("Left Eye", "Right Eye"),
-        ("Left Eye", "Nose"),
-        ("Right Eye", "Nose"),
-        ("Left Eye", "Left Ear"),
-        ("Right Eye", "Right Ear"),
-        ("Nose", "Left Shoulder"),
-        ("Nose", "Right Shoulder"),
-    ]
-    
-
     # Process each frame
     for frame_number, frame in tqdm(enumerate(frames), total=len(frames), desc="Overlaying keypoints"):
+        # Replace the frame with a black background if specified
+        if background == 'black':
+            frame = np.zeros((height, width, 3), dtype=np.uint8)
+        
         # Get keypoints for the current frame
         frame_keypoints = df.filter(pl.col("frame") == frame_number)
         
         # Draw keypoints and skeleton for each person
         for person in frame_keypoints["person"].unique():
             person_keypoints = frame_keypoints.filter(pl.col("person") == person)
-            color = tuple(map(int, colors[person % len(colors)]))
+            color = colors[int(person) % len(colors)]  # Ensure color is a tuple of integers in BGR
             
             # Draw keypoints
             for row in person_keypoints.iter_rows(named=True):
@@ -193,7 +197,7 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, outp
             # Draw skeleton
             for start, end in skeleton:
                 start_point = get_keypoint_coord(person_keypoints.filter(pl.col("keypoint") == start), width, height)
-                end_point = get_keypoint_coord(person_keypoints.filter(pl.col("keypoint") == end),  width, height)
+                end_point = get_keypoint_coord(person_keypoints.filter(pl.col("keypoint") == end), width, height)
                 
                 if start_point and end_point:
                     cv2.line(frame, start_point, end_point, color, 2)
@@ -207,4 +211,9 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, outp
     
     # Release the video writer
     out.release()
-    logging.info(f"Keypoints overlay video saved to {output_path / 'keypoints_overlay.mp4'}")
+    logging.info(f"Keypoints overlay video saved to {output_path / f'{file_name}.mp4'}")
+
+def create_skeletons(df, highlight_frame_list, output_path, fps, width, height):
+    for i, video_segment in enumerate(tqdm(highlight_frame_list, desc="Creating highlight skeletons")):
+        file_name = f"highlight_{i}_skeleton"
+        overlay_keypoints_on_frames(df, video_segment, fps, output_path, height, width, file_name, background='black')
