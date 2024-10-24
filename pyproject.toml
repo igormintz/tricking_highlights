@@ -18,10 +18,11 @@ vl-convert-python = "^1.6.1"
 pytest = "^8.3.3"
 
 
-[[tool.poetry.source]]
-name = "pytorch"
-url = "https://download.pytorch.org/whl/cu120"
-priority = "primary"
+#[[tool.poetry.source]]
+#name = "pytorch"
+#url = "https://download.pytorch.org/whl/cu120"
+#priority = "primary"
+ipykernel = "^6.29.5"
 
 [build-system]
 requires = ["poetry-core"]

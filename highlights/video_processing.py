@@ -16,14 +16,13 @@ KEYPOINT_NAMES = [
     "Left Knee", "Right Knee", "Left Ankle", "Right Ankle"
 ]
 
-DIFF_BW_FRAMES = 10
-N_INTRO_FRAMES = 30
-N_OUTRO_FRAMES = 30
+USE_N_FRAMES_PER_SECOND = 3
+SECONDS_BW_HIGHLIGHTS_THRESHOLD = 1
 
-def extract_keypoints(video_path: Path, output_path: Path, save_debug=False):
-    logging.info("loading model")
-    model = YOLO('yolov8n-pose.pt')
-    all_keypoints = []
+
+
+
+def get_video_properties(video_path: Path) -> tuple:
     logging.info("opening video")
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -31,16 +30,26 @@ def extract_keypoints(video_path: Path, output_path: Path, save_debug=False):
         logging.info("can't determine FPS. defaulting to 60")
         fps = 60
     logging.info(f"FPS: {fps}")
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    frames = []
+    n_total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    all_frames = []
     logging.info("processing video (iterating over frames)")
-    for frame_number in tqdm(range(total_frames), desc="Processing video"):
+    for frame_number in tqdm(range(n_total_frames), desc="Processing video"):
         ret, frame = cap.read()
         if not ret:
             break
-        frames.append(frame)
+        all_frames.append(frame)
+    cap.release()
+    return fps, all_frames, width, height
+
+def extract_keypoints(all_frames: list, output_path: Path, save_debug=False):
+    logging.info("loading model")
+    model = YOLO('yolov8n-pose.pt')
+    all_keypoints = []
+    for frame_number, frame in enumerate(tqdm(all_frames, desc="Extracting keypoints")):
         results = model(frame, verbose=False)
-        
         if results[0].keypoints is None:
             continue
         
@@ -58,84 +67,78 @@ def extract_keypoints(video_path: Path, output_path: Path, save_debug=False):
                         'confidence': float(conf)
                     })
 
-    cap.release()
     df = pl.DataFrame(all_keypoints)
-    logging.info("writing parquet file")
     if save_debug:
+        logging.info("writing parquet file")
         df.write_parquet(output_path / "raw_keypoints_data.parquet")
-    return df, frames, fps
+    return df
 
-def create_highlight_lists(highlight_frames, threshold=DIFF_BW_FRAMES) -> list[list[int]]:
+def create_highlight_lists(highlight_frames: list, fps: float, threshold_seconds=SECONDS_BW_HIGHLIGHTS_THRESHOLD) -> list[list[int]]:
     """
-    Create a list of highlight lists from a list of highlight frames.
+    Create a list of highlight lists (consecutive frame numbers) from a list of highlight frames.
     A highlight list is a list of frames where the difference between consecutive frames is less than or equal to the threshold.
     """
     result = []
-    current_group = [highlight_frames[0]]
-    
-    for num in highlight_frames[1:]:
-        if num - current_group[-1] < 10:
-            current_group.append(num)
+    start_frame = highlight_frames[0]
+    end_frame = highlight_frames[0]
+    frame_threshold = int(threshold_seconds*fps)
+    for next_frame in highlight_frames[1:]:
+        if next_frame - end_frame < frame_threshold:
+            end_frame = next_frame
         else:
-            result.append(current_group)
-            current_group = [num]
-    
-    result.append(current_group)  # Add the last group
+            if (end_frame - start_frame) / fps > 1
+            # append only >1 second videos
+              result.append(list(range(start_frame, end_frame)))
+            start_frame = next_frame
+            end_frame = next_frame
     return result
 
-def add_intro_and_outro(highlight_frame_list: list[list[int]]) -> list[list[int]]:
+def add_intro_and_outro(highlight_frame_list: list[list[int]], last_frame:int, fps:float) -> list[list[int]]:
     """
     Add intro and outro to the highlight frame list.
     """
-    # for every element in the list, add N_INTRO_FRAMES to the beginning and N_OUTRO_FRAMES to the end
-    for i, group in enumerate(highlight_frame_list):
-        highlight_frame_list[i] = [group[0] - N_INTRO_FRAMES, group[-1] + N_OUTRO_FRAMES]
+    extra_frames = int(SECONDS_BW_HIGHLIGHTS_THRESHOLD*fps/2) #to avoid overlapping
+    updated_highlight_frame_list = []
+    for frames in highlight_frame_list:
+        if not frames:
+            continue
+        start_frame = max(0, frames[0] - extra_frames)
+        end_frame = min(frames[-1] + extra_frames, last_frame) 
+        updated_highlight_frame_list.append(list(range(start_frame, end_frame + 1)))
+    
     return highlight_frame_list
 
-def create_video_segments(highlight_frame_list, frames, output_path, input_video_path):
-    video_segments = [frames[start:end] for start, end in highlight_frame_list]
-    
-    # Open the original video file
-    cap = cv2.VideoCapture(str(input_video_path))
-    
-    if not cap.isOpened():
-        print("Error: Could not open video file")
-        return
-    
-    # Get video properties
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    for i, segment_frames in enumerate(video_segments):
-        if len(segment_frames) == 0: #TODO: investigate these cases.
+def create_video_segments(highlight_frame_list, all_frames, output_path: Path, fps: float, width, height):
+    for i, video_segment in enumerate(highlight_frame_list):
+        if len(video_segment) == 0:  # TODO: investigate these cases.
             print(f"Warning: No frames found for highlight {i+1}")
             continue
         output_file = output_path / f"highlight_{i+1}.mp4"
         
-        print(f"Creating video segment {i+1} with {len(segment_frames)} frames")
+        print(f"Creating video segment {i+1} with {len(video_segment)} frames")
         
         out = cv2.VideoWriter(str(output_file), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         
-        for frame_number in segment_frames:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-            ret, frame = cap.read()
-            if ret:
-                out.write(frame)
-            else:
-                print(f"Warning: Could not read frame {frame_number}")
+        # Write each frame in the video segment to the output video
+        for frame_number in video_segment:
+            out.write(all_frames[frame_number])
         
         out.release()
         print(f"Created highlight_{i+1}.mp4")
     
-    cap.release()
-    print(f"Created {len(video_segments)} video segments")
+    print(f"Created {len(highlight_frame_list)} video segments")
 
-def overlay_keypoints_on_frames(df, frames, fps, output_path):
+def get_keypoint_coord(kp, width, height):
+    if len(kp) > 0 and kp['x'][0] is not None and kp['y'][0] is not None:
+        x, y = kp['x'][0], kp['y'][0]
+        # Check if the keypoint is at (0,0)
+        if x == 0 and y == 0:
+            return None
+        return (int(x * width), int(y * height))
+    return None
+
+def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, output_path: Path, height, width):
     logging.info("Overlaying keypoints on frames")
-    
-    # Get video dimensions
-    height, width = frames[0].shape[:2]
     
     # Prepare video writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -170,14 +173,6 @@ def overlay_keypoints_on_frames(df, frames, fps, output_path):
         ("Nose", "Right Shoulder"),
     ]
     
-    def get_keypoint_coord(kp):
-        if len(kp) > 0 and kp['x'][0] is not None and kp['y'][0] is not None:
-            x, y = kp['x'][0], kp['y'][0]
-            # Check if the keypoint is at (0,0)
-            if x == 0 and y == 0:
-                return None
-            return (int(x * width), int(y * height))
-        return None
 
     # Process each frame
     for frame_number, frame in tqdm(enumerate(frames), total=len(frames), desc="Overlaying keypoints"):
@@ -191,14 +186,14 @@ def overlay_keypoints_on_frames(df, frames, fps, output_path):
             
             # Draw keypoints
             for row in person_keypoints.iter_rows(named=True):
-                coord = get_keypoint_coord(pl.DataFrame([row]))
+                coord = get_keypoint_coord(pl.DataFrame([row]), width, height)
                 if coord:
                     cv2.circle(frame, coord, 3, color, -1)
             
             # Draw skeleton
             for start, end in skeleton:
-                start_point = get_keypoint_coord(person_keypoints.filter(pl.col("keypoint") == start))
-                end_point = get_keypoint_coord(person_keypoints.filter(pl.col("keypoint") == end))
+                start_point = get_keypoint_coord(person_keypoints.filter(pl.col("keypoint") == start), width, height)
+                end_point = get_keypoint_coord(person_keypoints.filter(pl.col("keypoint") == end),  width, height)
                 
                 if start_point and end_point:
                     cv2.line(frame, start_point, end_point, color, 2)
