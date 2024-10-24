@@ -1,9 +1,10 @@
 import argparse
 import logging
-from video_processing import extract_keypoints, create_highlight_lists, add_intro_and_outro, create_video_segments, overlay_keypoints_on_frames, get_video_properties
+from video_processing import extract_keypoints, create_highlight_lists, add_intro_and_outro, create_video_segments, overlay_keypoints_on_frames, get_video_properties, create_skeletons
 from keypoints_processing import process_keypoints
 from pathlib import Path
 import shutil
+from copy import deepcopy
 
 def create_output_dir(output_path: Path) -> None:
     """Create output_path folder. If exists, overwrite"""
@@ -24,12 +25,12 @@ def main(input_path: Path, output_path: Path, save_debug: bool):
     df = extract_keypoints(all_frames, output_path, save_debug)
     
     if save_debug:
-        overlay_keypoints_on_frames(df, all_frames, fps, output_path)
+        overlay_keypoints_on_frames(df, deepcopy(all_frames), fps, output_path, height, width,"keypoints_overlay_full")
     logging.info("Processing keypoints")
-    df = process_keypoints(df, output_path, fps, save_debug)
+    processed_df = process_keypoints(deepcopy(df), output_path, fps, save_debug)
     
     logging.info("Extracting frames from processed data")
-    filtered_frames = df['frame'].to_list()
+    filtered_frames = processed_df['frame'].to_list()
     
     logging.info("Creating highlight lists")
     highlight_frame_list = create_highlight_lists(filtered_frames, fps)
@@ -40,6 +41,7 @@ def main(input_path: Path, output_path: Path, save_debug: bool):
     logging.info("Creating video segments")
     create_video_segments(highlight_frame_list, all_frames, output_path, fps, width, height)
     
+    create_skeletons(df, highlight_frame_list, output_path, fps, width, height)
     logging.info("Video processing completed")
 
 if __name__ == "__main__":
