@@ -162,12 +162,8 @@ def get_keypoint_coord(kp, width, height):
         return (int(x * width), int(y * height))
     return None
 
-def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, output_path: Path, height, width, file_name: str, background=None):
+def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, output_path: Path, height, width, file_name: str):
     logging.info("Overlaying keypoints on frames")
-    
-    # Prepare video writer
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path / f"{file_name}.mp4"), fourcc, fps, (width, height))
     
     # Define colors for each person in BGR format
     colors = plt.cm.rainbow(np.linspace(0, 1, 10))[:, :3] * 255  # Up to 10 different colors
@@ -175,11 +171,8 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, outp
     colors = [tuple(map(int, color[::-1])) for color in colors]  # Convert from RGB to BGR
     
     # Process each frame
+    skeleton_frames = []
     for frame_number, frame in tqdm(enumerate(frames), total=len(frames), desc="Overlaying keypoints"):
-        # Replace the frame with a black background if specified
-        if background == 'black':
-            frame = np.zeros((height, width, 3), dtype=np.uint8)
-        
         # Get keypoints for the current frame
         frame_keypoints = df.filter(pl.col("frame") == frame_number)
         
@@ -205,15 +198,18 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, outp
                     cv2.circle(frame, start_point, 3, color, -1)
                 elif end_point:
                     cv2.circle(frame, end_point, 3, color, -1)
+        skeleton_frames.append(frame)
         
-        # Write the frame to the output video
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(str(output_path / f"{file_name}.mp4"), fourcc, fps, (width, height))
+    for frame in skeleton_frames:
         out.write(frame)
-    
-    # Release the video writer
     out.release()
-    logging.info(f"Keypoints overlay video saved to {output_path / f'{file_name}.mp4'}")
+    logging.info(f"Keypoints overlay video saved to {output_path / f'{file_name}.mp4'}. {len(skeleton_frames)} frames")
 
 def create_skeletons(df, highlight_frame_list, output_path, fps, width, height):
     for i, video_segment in enumerate(tqdm(highlight_frame_list, desc="Creating highlight skeletons")):
         file_name = f"highlight_{i}_skeleton"
-        overlay_keypoints_on_frames(df, video_segment, fps, output_path, height, width, file_name, background='black')
+        # Create a list of blank frames for the entire video segment
+        blank_frames = [np.zeros((height, width, 3), dtype=np.uint8) for _ in video_segment]
+        overlay_keypoints_on_frames(df, blank_frames, fps, output_path, height, width, file_name)
