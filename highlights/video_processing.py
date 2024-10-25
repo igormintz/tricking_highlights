@@ -69,9 +69,14 @@ def get_video_properties(video_path: Path) -> tuple:
     cap.release()
     return fps, all_frames, width, height
 
-def extract_keypoints(all_frames: list, output_path: Path, save_debug=False):
+def extract_keypoints(all_frames: list, output_path: Path, model_speed='medium', save_debug=False):
     logging.info("loading model")
-    model = YOLO('yolov8n-pose.pt')
+    model_map = {
+        'fast': 'yolo11n-pose.pt',
+        'medium': 'yolo11m-pose.pt',
+    }
+    model_path = model_map[model_speed]
+    model = YOLO(model_path)
     all_keypoints = []
     for frame_number, frame in enumerate(tqdm(all_frames, desc="Extracting keypoints")):
         results = model(frame, verbose=False)
@@ -199,13 +204,16 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, outp
                 elif end_point:
                     cv2.circle(frame, end_point, 3, color, -1)
         skeleton_frames.append(frame)
-        
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path / f"{file_name}.mp4"), fourcc, fps, (width, height))
-    for frame in skeleton_frames:
-        out.write(frame)
-    out.release()
-    logging.info(f"Keypoints overlay video saved to {output_path / f'{file_name}.mp4'}. {len(skeleton_frames)} frames")
+    if not skeleton_frames:
+        logging.error("No frames were processed!")
+        return
+    return skeleton_frames 
+    # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    # out = cv2.VideoWriter(str(output_path / f"{file_name}.mp4"), fourcc, fps, (width, height))
+    # for frame in skeleton_frames:
+    #     out.write(frame)
+    # out.release()
+    # logging.info(f"Keypoints overlay video saved to {output_path / f'{file_name}.mp4'}. {len(skeleton_frames)} frames")
 
 def create_skeletons(df, highlight_frame_list, output_path, fps, width, height):
     for i, video_segment in enumerate(tqdm(highlight_frame_list, desc="Creating highlight skeletons")):

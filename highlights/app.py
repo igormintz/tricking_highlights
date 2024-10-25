@@ -16,16 +16,15 @@ def create_output_dir(output_path: Path) -> None:
                 item.unlink()
     output_path.mkdir(parents=True, exist_ok=True)
 
-def main(input_path: Path, output_path: Path, save_debug: bool):
+def main(input_path: Path, output_path: Path, model_speed:str, save_debug: bool):
     create_output_dir(output_path)
     logging.info("Starting video processing")
     
     logging.info("Extracting keypoints")
     fps, all_frames, width, height = get_video_properties(input_path)
-    df = extract_keypoints(all_frames, output_path, save_debug)
+    df = extract_keypoints(all_frames, output_path, model_speed, save_debug)
     
-    if save_debug:
-        overlay_keypoints_on_frames(df, deepcopy(all_frames), fps, output_path, height, width,"keypoints_overlay_full")
+    skeleton_frames = overlay_keypoints_on_frames(df, deepcopy(all_frames), fps, output_path, height, width,"keypoints_overlay_full")
     logging.info("Processing keypoints")
     processed_df = process_keypoints(deepcopy(df), output_path, fps, save_debug)
     
@@ -48,10 +47,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process video keypoints")
     parser.add_argument("--input_path", required=True, help="Path to the input video file")
     parser.add_argument("--output_path", required=True, help="Path to save intermediate CSV files")
+    parser.add_argument("--model", type=str, choices=['fast', 'medium'], default='medium',
+                        help="Select YOLO model speed. 'fast' uses yolo11n-pose.pt, 'medium' uses yolo11m-pose.pt (default), 'slow' uses yolo11x-pose.pt")
     parser.add_argument("--save_debug", action="store_true", default=False, help="Save debug information")
     
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     
-    main(Path(args.input_path), Path(args.output_path), args.save_debug)
+    main(Path(args.input_path), Path(args.output_path), args.model, args.save_debug)
