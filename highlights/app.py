@@ -37,27 +37,23 @@ def main(input_path: Path, output_path: Path, model_speed:str, save_debug: bool)
     
     logging.info("Extracting keypoints")
     fps, all_frames, width, height = get_video_properties(input_path)
+    all_frames = all_frames[:int(len(all_frames)/4)]##########################remove
     df = extract_keypoints(all_frames, output_path, model_speed, save_debug)
     if save_debug:
         logging.info("overlaying all frames and saving")
-        overlayed = overlay_keypoints_on_frames(df, deepcopy(all_frames))
-        # save all , fps, output_path, height, width,"keypoints_overlay_full"
+        overlayed = overlay_keypoints_on_frames(df, deepcopy(all_frames), width, height)
     logging.info("Processing keypoints")
     processed_df = process_keypoints(deepcopy(df), output_path, fps, save_debug)
     
     logging.info("Extracting frames from processed data")
     filled_gaps = fill_gaps(processed_df['frame'].to_list(), threshold=SECONDS_BW_HIGHLIGHTS_THRESHOLD*fps)
     logging.info("Creating highlight lists")
-    # highlight_frame_list = create_highlight_lists(filtered_frames, fps)
     
-    # logging.info("Adding intro and outro")
-    # highlight_frame_list = add_intro_and_outro(highlight_frame_list, last_frame=len(all_frames), fps=fps)
     relevant_df = df.filter(
         (pl.col('person').is_in(processed_df['person'].cast(pl.Int64)))
         & pl.col('frame').is_in(processed_df['frame'])
          )
     logging.info("Creating frames with skeleton")
-    # create_video_segments(highlight_frame_list, all_frames, output_path, fps, width, height)
     blank_frames = [np.zeros((height, width, 3), dtype=np.uint8) for _ in range(len(relevant_df))]
     black_frames_with_skeleton = overlay_keypoints_on_frames(relevant_df, blank_frames, width, height) # , output_path, fps, width, height
     relevant_frames = [all_frames[i] for i in relevant_df['frame'].to_list()]
