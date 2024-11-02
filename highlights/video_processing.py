@@ -78,7 +78,7 @@ def extract_keypoints(all_frames: list, output_path: Path, model_speed='medium',
     model_path = model_map[model_speed]
     model = YOLO(model_path)
     all_keypoints = []
-    for frame_number, frame in enumerate(tqdm(all_frames, desc="Extracting keypoints")):
+    for frame_number, frame in enumerate(tqdm(all_frames, desc="Extracting keypoints", dynamic_ncols=True)):
         results = model(frame, verbose=False)
         if results[0].keypoints is None:
             continue
@@ -138,25 +138,42 @@ def add_intro_and_outro(highlight_frame_list: list[list[int]], last_frame:int, f
     
     return highlight_frame_list
 
-def create_video_segments(highlight_frame_list, all_frames, output_path: Path, fps: float, width, height):
-    for i, video_segment in enumerate(highlight_frame_list):
-        if len(video_segment) == 0:  # TODO: investigate these cases.
-            print(f"Warning: No frames found for highlight {i+1}")
-            continue
-        output_file = output_path / f"highlight_{i+1}.mp4"
-        
-        print(f"Creating video segment {i+1} with {len(video_segment)} frames")
-        
-        out = cv2.VideoWriter(str(output_file), cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
-        
-        # Write each frame in the video segment to the output video
-        for frame_number in video_segment:
-            out.write(all_frames[frame_number])
-        
-        out.release()
-        print(f"Created highlight_{i+1}.mp4")
+def save_frames_as_video(black_frames_with_skeleton, relevant_frames, output_path, fps, width, height, slowing_facor):
+    """check if the vidoes are landscape or vertical based on the width and height.
+    if landscape, put the relevant_frames on top of the black_frames_with_skeleton 
+    if vertical, put the relevant_frames on the right of the black_frames_with_skeleton.
+    save as a video. make the video slower by the `slowing_factor`
+    """
+    # Determine orientation
+    is_landscape = width >= height
     
-    print(f"Created {len(highlight_frame_list)} video segments")
+    # Calculate dimensions for combined frame
+    if is_landscape:
+        combined_height = height * 2
+        combined_width = width
+    else:
+        combined_height = height 
+        combined_width = width * 2
+        
+    # Create video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(str(output_path / 'combined_video.mp4'), 
+                         fourcc, 
+                         fps/slowing_facor,  # Slow down the video
+                         (combined_width, combined_height))
+
+    # Combine and write frames
+    for black_frame, orig_frame in zip(black_frames_with_skeleton, relevant_frames):
+        if is_landscape:
+            # Stack vertically for landscape
+            combined = np.vstack((orig_frame, black_frame))
+        else:
+            # Stack horizontally for portrait
+            combined = np.hstack((orig_frame, black_frame))
+            
+        out.write(combined)
+        
+    out.release()
 
 def get_keypoint_coord(kp, width, height):
     if len(kp) > 0 and kp['x'][0] is not None and kp['y'][0] is not None:
@@ -167,7 +184,7 @@ def get_keypoint_coord(kp, width, height):
         return (int(x * width), int(y * height))
     return None
 
-def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, output_path: Path, height, width, file_name: str):
+def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, width, height):
     logging.info("Overlaying keypoints on frames")
     
     # Define colors for each person in BGR format
@@ -208,16 +225,10 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, fps: float, outp
         logging.error("No frames were processed!")
         return
     return skeleton_frames 
-    # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    # out = cv2.VideoWriter(str(output_path / f"{file_name}.mp4"), fourcc, fps, (width, height))
-    # for frame in skeleton_frames:
-    #     out.write(frame)
-    # out.release()
-    # logging.info(f"Keypoints overlay video saved to {output_path / f'{file_name}.mp4'}. {len(skeleton_frames)} frames")
-
-def create_skeletons(df, highlight_frame_list, output_path, fps, width, height):
-    for i, video_segment in enumerate(tqdm(highlight_frame_list, desc="Creating highlight skeletons")):
-        file_name = f"highlight_{i}_skeleton"
-        # Create a list of blank frames for the entire video segment
-        blank_frames = [np.zeros((height, width, 3), dtype=np.uint8) for _ in video_segment]
-        overlay_keypoints_on_frames(df, blank_frames, fps, output_path, height, width, file_name)
+  
+# def draw_skeleton_on_black_background(df, frames):
+#     for i, frame in enumerate(tqdm(frames, desc="adding skeletons")):
+#         file_name = f"highlight_{i}_skeleton"
+#         # Create a list of blank frames for the entire video segment
+#         blank_frames = [np.zeros((height, width, 3), dtype=np.uint8) for _ in video_segment]
+#         overlay_keypoints_on_frames(df, blank_frames, fps, output_path, height, width, file_name)
