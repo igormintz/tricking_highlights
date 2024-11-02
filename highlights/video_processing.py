@@ -123,20 +123,6 @@ def create_highlight_lists(highlight_frames: list, fps: float, threshold_seconds
             end_frame = next_frame
     return result
 
-def add_intro_and_outro(highlight_frame_list: list[list[int]], last_frame:int, fps:float) -> list[list[int]]:
-    """
-    Add intro and outro to the highlight frame list.
-    """
-    extra_frames = int(SECONDS_BW_HIGHLIGHTS_THRESHOLD*fps/2) #to avoid overlapping
-    updated_highlight_frame_list = []
-    for frames in highlight_frame_list:
-        if not frames:
-            continue
-        start_frame = max(0, frames[0] - extra_frames)
-        end_frame = min(frames[-1] + extra_frames, last_frame) 
-        updated_highlight_frame_list.append(list(range(start_frame, end_frame + 1)))
-    
-    return highlight_frame_list
 
 def save_frames_as_video(black_frames_with_skeleton, relevant_frames, output_path, fps, width, height, slowing_facor):
     """check if the vidoes are landscape or vertical based on the width and height.
@@ -225,10 +211,3 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, width, height):
         logging.error("No frames were processed!")
         return
     return skeleton_frames 
-  
-# def draw_skeleton_on_black_background(df, frames):
-#     for i, frame in enumerate(tqdm(frames, desc="adding skeletons")):
-#         file_name = f"highlight_{i}_skeleton"
-#         # Create a list of blank frames for the entire video segment
-#         blank_frames = [np.zeros((height, width, 3), dtype=np.uint8) for _ in video_segment]
-#         overlay_keypoints_on_frames(df, blank_frames, fps, output_path, height, width, file_name)
