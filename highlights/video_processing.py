@@ -173,12 +173,7 @@ def save_frames_as_video(black_frames_with_skeleton, relevant_frames, output_pat
     out.release()
     print("Video saved successfully")
 
-    # Save first, middle and last frames as images for inspection
-    debug_frames = [0, len(black_frames_with_skeleton)//2, len(black_frames_with_skeleton)-1]
-    for frame_idx in debug_frames:
-        debug_frame = np.hstack((black_frames_with_skeleton[frame_idx], relevant_frames[frame_idx]))
-        cv2.imwrite(str(output_path / f'debug_frame_{frame_idx}.jpg'), debug_frame)
-    
+
 
 def get_keypoint_coord(kp, width, height):
     if len(kp) > 0 and kp['x'][0] is not None and kp['y'][0] is not None:
