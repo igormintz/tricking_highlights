@@ -1,5 +1,7 @@
 import argparse
 import logging
+
+import cv2
 from video_processing import extract_keypoints, overlay_keypoints_on_frames, get_video_properties, save_frames_as_video
 from keypoints_processing import process_keypoints
 from pathlib import Path
@@ -37,26 +39,36 @@ def main(input_path: Path, output_path: Path, model_speed:str, save_debug: bool)
     
     logging.info("Extracting keypoints")
     fps, all_frames, width, height = get_video_properties(input_path)
-    all_frames = all_frames[:int(len(all_frames)/4)]##########################remove
     df = extract_keypoints(all_frames, output_path, model_speed, save_debug)
     if save_debug:
         logging.info("overlaying all frames and saving")
         overlayed = overlay_keypoints_on_frames(df, deepcopy(all_frames), width, height)
     logging.info("Processing keypoints")
     processed_df = process_keypoints(deepcopy(df), output_path, fps, save_debug)
-    
-    logging.info("Extracting frames from processed data")
-    filled_gaps = fill_gaps(processed_df['frame'].to_list(), threshold=SECONDS_BW_HIGHLIGHTS_THRESHOLD*fps)
-    logging.info("Creating highlight lists")
-    
+    frames_with_filled_gaps = fill_gaps(processed_df['frame'].to_list(), threshold=SECONDS_BW_HIGHLIGHTS_THRESHOLD*fps)
     relevant_df = df.filter(
         (pl.col('person').is_in(processed_df['person'].cast(pl.Int64)))
-        & pl.col('frame').is_in(processed_df['frame'])
-         )
+        & pl.col('frame').is_in(frames_with_filled_gaps)
+    )
+    
+    # Create a mapping of old frame numbers to new sequential indices
+    frame_mapping = {old: new for new, old in enumerate(frames_with_filled_gaps)}
+    
+    # Update the frame numbers in relevant_df to match the new sequential indices
+    relevant_df = relevant_df.with_columns(
+        pl.col('frame').replace_strict(frame_mapping)
+    )
+    
+    # Get the frames in the same order
+    relevant_frames = [all_frames[i] for i in frames_with_filled_gaps]
+    relevant_df.write_csv('relevant.csv')
     logging.info("Creating frames with skeleton")
-    blank_frames = [np.zeros((height, width, 3), dtype=np.uint8) for _ in range(len(relevant_df))]
-    black_frames_with_skeleton = overlay_keypoints_on_frames(relevant_df, blank_frames, width, height) # , output_path, fps, width, height
-    relevant_frames = [all_frames[i] for i in relevant_df['frame'].to_list()]
+    
+    # Create empty black frames instead of using video frames
+    blank_frames = [np.zeros((height, width, 3), dtype=np.uint8) for _ in range(len(relevant_frames))]
+    black_frames_with_skeleton = overlay_keypoints_on_frames(relevant_df, blank_frames, width, height)
+    
+    # Continue with the combined video
     save_frames_as_video(black_frames_with_skeleton, relevant_frames, output_path, fps, width, height, SLOWING_FACTOR)
     logging.info("Video processing completed")
 
