@@ -124,42 +124,61 @@ def create_highlight_lists(highlight_frames: list, fps: float, threshold_seconds
     return result
 
 
-def save_frames_as_video(black_frames_with_skeleton, relevant_frames, output_path, fps, width, height, slowing_facor):
-    """check if the vidoes are landscape or vertical based on the width and height.
-    if landscape, put the relevant_frames on top of the black_frames_with_skeleton 
-    if vertical, put the relevant_frames on the right of the black_frames_with_skeleton.
-    save as a video. make the video slower by the `slowing_factor`
+import cv2
+import numpy as np
+from pathlib import Path
+
+def save_frames_as_video(black_frames_with_skeleton, relevant_frames, output_path, fps, width, height, slowing_factor):
     """
-    # Determine orientation
-    is_landscape = width >= height
+    Combine two sets of frames into a single video, either side by side or top/bottom depending on orientation.
+    """
+    # Verify we have the same number of frames
+    if len(black_frames_with_skeleton) != len(relevant_frames):
+        logging.warning(f"Frame count mismatch: skeleton={len(black_frames_with_skeleton)}, original={len(relevant_frames)}")
+        # Use the shorter length to avoid index errors
+        n_frames = min(len(black_frames_with_skeleton), len(relevant_frames))
+        black_frames_with_skeleton = black_frames_with_skeleton[:n_frames]
+        relevant_frames = relevant_frames[:n_frames]
     
-    # Calculate dimensions for combined frame
+    # Adjust FPS for slowing factor
+    output_fps = fps / slowing_factor
+    
+    is_landscape = width >= height
+
     if is_landscape:
         combined_height = height * 2
         combined_width = width
     else:
-        combined_height = height 
-        combined_width = width * 2
-        
+        combined_height = height
+        combined_width = width * 2 
+
     # Create video writer
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(str(output_path / 'combined_video.mp4'), 
-                         fourcc, 
-                         fps/slowing_facor,  # Slow down the video
-                         (combined_width, combined_height))
-
-    # Combine and write frames
-    for black_frame, orig_frame in zip(black_frames_with_skeleton, relevant_frames):
+    out = cv2.VideoWriter(
+        str(output_path / 'combined_video.mp4'),
+        fourcc,
+        output_fps / slowing_factor,
+        (combined_width, combined_height)
+    )
+    
+       # Combine and write frames
+    for i, (frame1, frame2) in enumerate(zip(relevant_frames, black_frames_with_skeleton)):
         if is_landscape:
-            # Stack vertically for landscape
-            combined = np.vstack((orig_frame, black_frame))
+            combined = np.vstack((frame1, frame2))
         else:
-            # Stack horizontally for portrait
-            combined = np.hstack((orig_frame, black_frame))
-            
-        out.write(combined)
+            combined = np.hstack((frame1, frame2))
         
+        out.write(combined)
+    
     out.release()
+    print("Video saved successfully")
+
+    # Save first, middle and last frames as images for inspection
+    debug_frames = [0, len(black_frames_with_skeleton)//2, len(black_frames_with_skeleton)-1]
+    for frame_idx in debug_frames:
+        debug_frame = np.hstack((black_frames_with_skeleton[frame_idx], relevant_frames[frame_idx]))
+        cv2.imwrite(str(output_path / f'debug_frame_{frame_idx}.jpg'), debug_frame)
+    
 
 def get_keypoint_coord(kp, width, height):
     if len(kp) > 0 and kp['x'][0] is not None and kp['y'][0] is not None:
@@ -181,19 +200,20 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, width, height):
     # Process each frame
     skeleton_frames = []
     for frame_number, frame in tqdm(enumerate(frames), total=len(frames), desc="Overlaying keypoints"):
+        # Create a copy of the frame to draw on
+        frame_copy = frame.copy()
+        
         # Get keypoints for the current frame
         frame_keypoints = df.filter(pl.col("frame") == frame_number)
-        
         # Draw keypoints and skeleton for each person
         for person in frame_keypoints["person"].unique():
             person_keypoints = frame_keypoints.filter(pl.col("person") == person)
-            color = colors[int(person) % len(colors)]  # Ensure color is a tuple of integers in BGR
-            
+            color = colors[int(person) % len(colors)]
             # Draw keypoints
             for row in person_keypoints.iter_rows(named=True):
                 coord = get_keypoint_coord(pl.DataFrame([row]), width, height)
                 if coord:
-                    cv2.circle(frame, coord, 3, color, -1)
+                    cv2.circle(frame_copy, coord, 3, color, -1)
             
             # Draw skeleton
             for start, end in skeleton:
@@ -201,13 +221,15 @@ def overlay_keypoints_on_frames(df: pl.DataFrame, frames: list, width, height):
                 end_point = get_keypoint_coord(person_keypoints.filter(pl.col("keypoint") == end), width, height)
                 
                 if start_point and end_point:
-                    cv2.line(frame, start_point, end_point, color, 2)
+                    cv2.line(frame_copy, start_point, end_point, color, 2)
                 elif start_point:
-                    cv2.circle(frame, start_point, 3, color, -1)
+                    cv2.circle(frame_copy, start_point, 3, color, -1)
                 elif end_point:
-                    cv2.circle(frame, end_point, 3, color, -1)
-        skeleton_frames.append(frame)
+                    cv2.circle(frame_copy, end_point, 3, color, -1)
+        
+        skeleton_frames.append(frame_copy)
+    
     if not skeleton_frames:
         logging.error("No frames were processed!")
         return
-    return skeleton_frames 
+    return skeleton_frames
