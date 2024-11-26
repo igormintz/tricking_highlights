@@ -76,8 +76,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process video keypoints")
     parser.add_argument("--input_path", required=True, help="Path to the input video file")
     parser.add_argument("--output_path", required=True, help="Path to save intermediate CSV files")
-    parser.add_argument("--model", type=str, choices=['fast', 'medium'], default='medium',
-                        help="Select YOLO model speed. 'fast' uses yolo11n-pose.pt, 'medium' uses yolo11m-pose.pt (default), 'slow' uses yolo11x-pose.pt")
+    parser.add_argument("--model", type=str, choices=['fast', 'medium', 'mediapipe'], default='medium',
+                        help="Select model type. 'fast' uses yolo11n-pose.pt, 'medium' uses yolo11m-pose.pt (default), 'mediapipe' uses MediaPipe Pose")
     parser.add_argument("--save_debug", action="store_true", default=False, help="Save debug information")
     
     args = parser.parse_args()

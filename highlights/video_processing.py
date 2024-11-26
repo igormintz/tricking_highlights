@@ -7,6 +7,11 @@ from pathlib import Path
 import logging
 import numpy as np
 import matplotlib.pyplot as plt
+import mediapipe as mp
+
+# Configure MediaPipe logging to only show warnings and errors
+mp_logger = logging.getLogger("mediapipe")
+mp_logger.setLevel(logging.WARNING)
 
 # Define keypoint names
 KEYPOINT_NAMES = [
@@ -16,7 +21,7 @@ KEYPOINT_NAMES = [
     "Left Knee", "Right Knee", "Left Ankle", "Right Ankle"
 ]
 
-    # Define connections for skeleton
+# Define connections for skeleton
 skeleton = [
     # Body
     ("Left Shoulder", "Right Shoulder"),
@@ -44,9 +49,6 @@ skeleton = [
 USE_N_FRAMES_PER_SECOND = 3
 SECONDS_BW_HIGHLIGHTS_THRESHOLD = 1
 
-
-
-
 def get_video_properties(video_path: Path) -> tuple:
     logging.info("opening video")
     cap = cv2.VideoCapture(video_path)
@@ -69,33 +71,92 @@ def get_video_properties(video_path: Path) -> tuple:
     cap.release()
     return fps, all_frames, width, height
 
+def extract_keypoints_mediapipe(frame):
+    """Extract keypoints using MediaPipe Pose model"""
+    with mp.solutions.pose.Pose(
+        static_image_mode=True,  # Changed to True for better accuracy
+        model_complexity=2,      # Using highest complexity model
+        enable_segmentation=True,  # Enable segmentation for better person detection
+        smooth_segmentation=True,  # Smooth segmentation between frames
+        min_detection_confidence=0.7,  # Increased for more reliable detections
+        min_tracking_confidence=0.7    # Increased for more stable tracking
+    ) as pose:
+        # Convert the BGR image to RGB
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # To improve detection quality, we can optionally resize large images
+        h, w = image_rgb.shape[:2]
+        if max(h, w) > 1280:  # If image is too large, resize it
+            scale = 1280 / max(h, w)
+            new_size = (int(w * scale), int(h * scale))
+            image_rgb = cv2.resize(image_rgb, new_size)
+        
+        results = pose.process(image_rgb)
+        
+        if not results.pose_landmarks:
+            return None
+            
+        # Convert landmarks to normalized coordinates
+        landmarks = []
+        for idx, landmark in enumerate(results.pose_landmarks.landmark):
+            # Add additional filtering for low confidence landmarks
+            confidence = landmark.visibility
+            if confidence < 0.5:  # Filter out low confidence detections
+                continue
+            landmarks.append({
+                'x': landmark.x,
+                'y': landmark.y,
+                'confidence': confidence
+            })
+        return landmarks if landmarks else None  # Return None if no valid landmarks found
+
 def extract_keypoints(all_frames: list, output_path: Path, model_speed='medium', save_debug=False):
+    """Extract keypoints using either YOLO or MediaPipe model"""
     logging.info("loading model")
-    model_map = {
-        'fast': 'yolo11n-pose.pt',
-        'medium': 'yolo11m-pose.pt',
-    }
-    model_path = model_map[model_speed]
-    model = YOLO(model_path)
+    
+    if model_speed == 'mediapipe':
+        logging.info("Using MediaPipe model")
+        model = None  # MediaPipe model is initialized per frame
+    else:
+        model_map = {
+            'fast': 'yolo11n-pose.pt',
+            'medium': 'yolo11m-pose.pt',
+        }
+        model_path = model_map[model_speed]
+        model = YOLO(model_path)
+    
     all_keypoints = []
     for frame_number, frame in enumerate(tqdm(all_frames, desc="Extracting keypoints", dynamic_ncols=True)):
-        results = model(frame, verbose=False)
-        if results[0].keypoints is None:
-            continue
-        
-        keypoints_xyn = results[0].keypoints.xyn
-        keypoints_conf = results[0].keypoints.conf
-        if keypoints_xyn is not None and keypoints_conf is not None:
-            for person_idx, (keypoints_xy, keypoints_c) in enumerate(zip(keypoints_xyn, keypoints_conf)):
-                for kp_idx, ((x, y), conf) in enumerate(zip(keypoints_xy, keypoints_c)):
-                    all_keypoints.append({
-                        'frame': frame_number,
-                        'person': person_idx,
-                        'keypoint': KEYPOINT_NAMES[kp_idx],
-                        'x': float(x),
-                        'y': float(y),
-                        'confidence': float(conf)
-                    })
+        if model_speed == 'mediapipe':
+            landmarks = extract_keypoints_mediapipe(frame)
+            if landmarks:
+                for kp_idx, landmark in enumerate(landmarks):
+                    if kp_idx < len(KEYPOINT_NAMES):  # Only process keypoints that match our naming
+                        all_keypoints.append({
+                            'frame': frame_number,
+                            'person': 0,  # MediaPipe processes one person at a time
+                            'keypoint': KEYPOINT_NAMES[kp_idx],
+                            'x': float(landmark['x']),
+                            'y': float(landmark['y']),
+                            'confidence': float(landmark['confidence'])
+                        })
+        else:
+            results = model(frame, verbose=False)
+            if results[0].keypoints is None:
+                continue
+            
+            keypoints_xyn = results[0].keypoints.xyn
+            keypoints_conf = results[0].keypoints.conf
+            if keypoints_xyn is not None and keypoints_conf is not None:
+                for person_idx, (keypoints_xy, keypoints_c) in enumerate(zip(keypoints_xyn, keypoints_conf)):
+                    for kp_idx, ((x, y), conf) in enumerate(zip(keypoints_xy, keypoints_c)):
+                        all_keypoints.append({
+                            'frame': frame_number,
+                            'person': person_idx,
+                            'keypoint': KEYPOINT_NAMES[kp_idx],
+                            'x': float(x),
+                            'y': float(y),
+                            'confidence': float(conf)
+                        })
 
     df = pl.DataFrame(all_keypoints)
     if save_debug:
@@ -122,7 +183,6 @@ def create_highlight_lists(highlight_frames: list, fps: float, threshold_seconds
             start_frame = next_frame
             end_frame = next_frame
     return result
-
 
 import cv2
 import numpy as np
