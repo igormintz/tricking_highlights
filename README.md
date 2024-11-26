@@ -1,6 +1,9 @@
 # Video Highlight Extractor
 
 This project uses computer vision techniques to extract highlights from videos, focusing on human pose estimation.
+Also, for technique improvement, it shows the original video and skeleton side-by-side
+# demo
+![Demo](assets/combined_video.gif)
 
 ## License
 
