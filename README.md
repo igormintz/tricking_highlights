@@ -18,7 +18,6 @@ The YOLO models used in this project (YOLOv8) are licensed under the GNU General
 
 Run the script with the following command:
 ```bash
-python highlights/app.py --input_path <input path> --output_path <output path>  --fast --save_debug
-```
-you can choose fast (less accurate), medium and slow (very accurate) models. debug mode is optional to get parquet files with the keypoints and charts of movement.
-highlight videos and skeleton highlight movies will be saved in the output path.
+python highlights/app.py --input_path <input path> --output_path <output path> --model <fast/medium/mediapipe --save_debug```
+you can choose between fast (YOLO11n, less accurate), medium (YOLO11m, more accurate) and mediapipe models. debug mode is optional to get parquet files with the keypoints and charts of movement.
+highlight videos and skeleton highlight movies will be saved in the output path with the skeleton model next to it.
